@@ -1,0 +1,68 @@
+# vps-backup configuration (sourced as bash).
+# Installed to /etc/vps-backup/vps-backup.conf: never overwritten by updates.
+# Any value omitted here falls back to the default shown.
+
+# --- Restic repository ---
+# Any restic backend works: rclone:<remote>:<path>, b2:<bucket>:<path>, s3:..., sftp:...
+RESTIC_REPOSITORY="rclone:gdrive:vps-backup"
+RESTIC_PASSWORD_FILE="/etc/vps-backup/restic-password"
+
+# --- Monitoring: Uptime Kuma push URL (empty = disabled) ---
+# Use a Push monitor with a heartbeat interval longer than the gap between runs (e.g. 25h).
+PUSH_URL=""
+
+# --- Paths ---
+LOG_DIR="/var/log/vps-backup"
+DUMP_DIR="/var/backups/vps-backup-dumps"
+VOLUMES_ROOT="/var/lib/docker/volumes"
+
+# --- Schedule (cron syntax, empty = mode disabled) ---
+# Apply changes with: sudo vps-backup schedule enable
+LIGHT_SCHEDULE="0 3 * * 1-6"
+FULL_SCHEDULE="0 3 * * 0"
+
+# --- Retention (snapshots kept per mode) ---
+LIGHT_KEEP_LAST=14
+FULL_KEEP_LAST=3
+# Share of stored data read back and verified after each full backup (empty = disabled)
+FULL_CHECK_SUBSET="5%"
+
+# --- Configuration paths: included in both light and full ---
+# Missing paths are skipped with a warning.
+CONFIG_PATHS=(
+  /var/www
+  /etc/ssh/sshd_config.d
+  /etc/fail2ban/jail.local
+  /etc/docker/daemon.json
+  /etc/sysctl.d
+  /etc/modprobe.d
+  /etc/lynis/custom.prf
+  /etc/cron.d
+  /etc/logrotate.d
+  /etc/vps-backup/vps-backup.conf
+  /root/.config/rclone
+)
+
+# --- Docker volumes added to the light backup (by volume name) ---
+LIGHT_VOLUMES=(
+  # uptime-kuma_uptime_kuma_data
+)
+
+# --- Containers excluded from backups (glob on container name) ---
+# No database dump, and their Docker volumes are skipped even when stopped.
+SKIP_CONTAINERS=(
+  "staging_*"
+)
+
+# --- Database images (glob) detected for dumps ---
+# Postgres uses POSTGRES_USER; MySQL/MariaDB use MARIADB_ROOT_PASSWORD or MYSQL_ROOT_PASSWORD.
+POSTGRES_IMAGES=("postgres*")
+MYSQL_IMAGES=("mysql*" "mariadb*")
+
+# --- Additional exclusions for the full backup (restic patterns) ---
+FULL_EXCLUDE_PATTERNS=(
+  "$VOLUMES_ROOT/*_logs"                              # log volumes
+  "$VOLUMES_ROOT/*_storage_data/_data/logs"           # Laravel logs
+  "$VOLUMES_ROOT/*_storage_data/_data/framework"      # Laravel cache, views, sessions
+  "$VOLUMES_ROOT/*_storage_data/_data/app/backups"    # spatie/laravel-backup local copies
+)

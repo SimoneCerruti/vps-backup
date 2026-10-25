@@ -1,0 +1,21 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax check
+        run: |
+          for file in vps-backup install.sh lib/*.sh vps-backup.conf.example; do
+            bash -n "$file"
+          done
+
+      - name: ShellCheck
+        run: shellcheck -x vps-backup install.sh lib/*.sh

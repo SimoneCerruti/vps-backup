@@ -1,0 +1,4 @@
+# Real configuration and secrets never belong in the repository
+vps-backup.conf
+restic-password
+*.log

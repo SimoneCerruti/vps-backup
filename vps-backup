@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# vps-backup: encrypted backups of a Docker VPS with restic.
+# https://github.com/SimoneCerruti/vps-backup
+# shellcheck source-path=SCRIPTDIR
+set -Eeuo pipefail
+
+VPS_BACKUP_HOME="$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")"
+
+# shellcheck source=lib/common.sh
+source "$VPS_BACKUP_HOME/lib/common.sh"
+# shellcheck source=lib/backup.sh
+source "$VPS_BACKUP_HOME/lib/backup.sh"
+# shellcheck source=lib/estimate.sh
+source "$VPS_BACKUP_HOME/lib/estimate.sh"
+# shellcheck source=lib/commands.sh
+source "$VPS_BACKUP_HOME/lib/commands.sh"
+
+usage() {
+  cat <<EOF
+vps-backup $(vps_backup_version) - encrypted backups of a Docker VPS with restic
+
+Usage: vps-backup <command> [options]
+
+Backups
+  run light|full          Run a backup
+                            light: server and project configuration
+                            full:  configuration + database dumps + Docker volumes
+  estimate                Estimate backup sizes without uploading anything
+  status                  Show schedule, latest snapshots and recent log lines
+
+Setup
+  init                    Create the repository password (if missing) and initialize the repository
+  schedule enable|disable|status
+                          Manage the cron schedule (LIGHT_SCHEDULE / FULL_SCHEDULE in the config)
+
+Maintenance
+  restic <args...>        Run restic against the configured repository (snapshots, restore, ...)
+  self-update [--version X.Y.Z | --ref BRANCH]
+                          Update vps-backup itself
+  version                 Print the installed version
+  help                    Show this help
+
+Config file: $VPS_BACKUP_CONFIG (override with VPS_BACKUP_CONFIG)
+EOF
+}
+
+main() {
+  local command="${1:-help}"
+  shift || true
+
+  case "$command" in
+    run)                  cmd_run "$@" ;;
+    light|full)           cmd_run "$command" ;;  # shorthand, kept for backward compatibility
+    estimate)             cmd_estimate ;;
+    status)               cmd_status ;;
+    init)                 cmd_init ;;
+    schedule)             cmd_schedule "$@" ;;
+    restic)               cmd_restic "$@" ;;
+    self-update)          cmd_self_update "$@" ;;
+    version|--version|-v) vps_backup_version ;;
+    help|--help|-h)       usage ;;
+    *)
+      usage >&2
+      exit "$EXIT_USAGE"
+      ;;
+  esac
+}
+
+main "$@"
