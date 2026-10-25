@@ -48,7 +48,7 @@ cmd_status() {
   load_config
 
   echo "== Version"
-  echo "  $(vps_backup_version)"
+  echo "  $(vps_backup_version) (slug: $BACKUP_SLUG)"
 
   echo
   echo "== Schedule"
@@ -56,8 +56,14 @@ cmd_status() {
 
   echo
   echo "== Latest snapshots (per tag)"
-  if ! restic snapshots --compact --group-by tags --latest 3 2>/dev/null; then
-    echo "  Repository not reachable or not initialized"
+  local output line
+  if output=$(restic snapshots --compact --host "$BACKUP_SLUG" --group-by tags --latest 3 2>&1); then
+    echo "$output"
+  else
+    echo "  Repository error:"
+    while IFS= read -r line; do
+      echo "    $line"
+    done <<< "$output"
   fi
 
   echo

@@ -26,17 +26,14 @@ cmd_run() {
   require_root
   load_config
   require_commands restic docker curl gzip flock numfmt
-  if [[ ! -s "$RESTIC_PASSWORD_FILE" ]]; then
-    die "$EXIT_CONFIG" "password file missing: $RESTIC_PASSWORD_FILE (run 'vps-backup init')"
-  fi
+  require_password_file
 
   BACKUP_MODE="$mode"
   LOG_CONTEXT="$mode"
 
-  # Prevent overlapping runs
-  exec 9>"$LOCK_FILE"
-  if ! flock -n 9; then
-    log ERROR "Another backup is already running"
+  # Prevent overlapping runs (the trap below must not remove the dumps of the running one)
+  if ! acquire_lock; then
+    log ERROR "Another backup or export is already running"
     exit "$EXIT_BACKUP"
   fi
 
@@ -46,10 +43,10 @@ cmd_run() {
 
   local started_at
   started_at=$(date +%s)
-  log INFO "Starting $mode backup (vps-backup $(vps_backup_version))"
+  log INFO "Starting $mode backup of $BACKUP_SLUG (vps-backup $(vps_backup_version))"
 
   local paths=("${CONFIG_PATHS[@]}")
-  local restic_args=(--tag "$mode")
+  local restic_args=(--host "$BACKUP_SLUG" --tag "$mode")
   local volume volume_path name engine dump_file size exclude
 
   if [[ "$mode" == "light" ]]; then
@@ -101,12 +98,13 @@ cmd_run() {
   log INFO "Uploading snapshot"
   run_logged restic backup "${restic_args[@]}" "${existing_paths[@]}"
 
-  # Retention is grouped by tag, so changing the configured paths does not orphan old snapshots
+  # Retention is grouped by tag, so changing the configured paths does not orphan old snapshots,
+  # and scoped by host, so servers sharing a repository never prune each other's snapshots
   log INFO "Applying retention"
   if [[ "$mode" == "light" ]]; then
-    run_logged restic forget --compact --tag light --group-by tags --prune --keep-last "$LIGHT_KEEP_LAST"
+    run_logged restic forget --compact --host "$BACKUP_SLUG" --tag light --group-by tags --prune --keep-last "$LIGHT_KEEP_LAST"
   else
-    run_logged restic forget --compact --tag full --group-by tags --prune --keep-last "$FULL_KEEP_LAST"
+    run_logged restic forget --compact --host "$BACKUP_SLUG" --tag full --group-by tags --prune --keep-last "$FULL_KEEP_LAST"
     if [[ -n "${FULL_CHECK_SUBSET:-}" ]]; then
       log INFO "Verifying $FULL_CHECK_SUBSET of the stored data"
       run_logged restic check --read-data-subset="$FULL_CHECK_SUBSET"

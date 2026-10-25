@@ -110,6 +110,10 @@ curl -fsSL "$archive_url" | tar -xz -C "$tmp_dir" --strip-components=1 \
 for file in "${REQUIRED_FILES[@]}"; do
   [[ -f "$tmp_dir/$file" ]] || die "unexpected archive layout, missing: $file"
 done
+# Libraries added after 1.0 are checked from the entrypoint, so older releases still install
+while read -r file; do
+  [[ -f "$tmp_dir/$file" ]] || die "unexpected archive layout, missing: $file"
+done < <(grep -oE 'lib/[a-z_-]+\.sh' "$tmp_dir/vps-backup" | sort -u)
 for script in "$tmp_dir/vps-backup" "$tmp_dir"/lib/*.sh; do
   bash -n "$script" || die "syntax check failed: ${script#"$tmp_dir"/}"
 done

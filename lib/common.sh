@@ -9,8 +9,12 @@ EXIT_CONFIG=3
 
 DEFAULT_REPO_SLUG="SimoneCerruti/vps-backup"
 VPS_BACKUP_CONFIG="${VPS_BACKUP_CONFIG:-/etc/vps-backup/vps-backup.conf}"
-CRON_FILE="/etc/cron.d/vps-backup"
-LOCK_FILE="/run/lock/vps-backup.lock"
+# System paths, overridable so that the test suite never touches the real ones
+CRON_FILE="${VPS_BACKUP_CRON_FILE:-/etc/cron.d/vps-backup}"
+LOCK_FILE="${VPS_BACKUP_LOCK_FILE:-/run/lock/vps-backup.lock}"
+
+# Snapshot host names: lowercase letters, digits and hyphens, 1-63 characters
+SLUG_REGEX='^[a-z0-9-]{1,63}$'
 
 # Usage: die EXIT_CODE message...
 die() {
@@ -21,7 +25,8 @@ die() {
 }
 
 require_root() {
-  if [[ $EUID -ne 0 ]]; then
+  # The test suite runs unprivileged against fake docker and restic
+  if [[ $EUID -ne 0 && "${VPS_BACKUP_ALLOW_NON_ROOT:-}" != "1" ]]; then
     die "$EXIT_USAGE" "this command must be run as root (use sudo)"
   fi
 }
@@ -43,9 +48,11 @@ load_config() {
   # Defaults: every value can be overridden by the config file
   RESTIC_REPOSITORY=""
   RESTIC_PASSWORD_FILE="/etc/vps-backup/restic-password"
+  BACKUP_SLUG=""
   PUSH_URL=""
   LOG_DIR="/var/log/vps-backup"
   DUMP_DIR="/var/backups/vps-backup-dumps"
+  EXPORT_DIR="/var/backups/vps-backup-exports"
   VOLUMES_ROOT="/var/lib/docker/volumes"
   LIGHT_KEEP_LAST=14
   FULL_KEEP_LAST=3
@@ -70,9 +77,37 @@ load_config() {
   fi
   export RESTIC_REPOSITORY RESTIC_PASSWORD_FILE
 
+  # Empty slug: the short hostname, the host restic recorded before 1.1.0 (unless it was an FQDN).
+  # Only an explicit value is validated, so 1.0.x configs keep working on any hostname.
+  if [[ -z "$BACKUP_SLUG" ]]; then
+    BACKUP_SLUG="$(hostname -s)"
+    if [[ -z "$BACKUP_SLUG" ]]; then
+      die "$EXIT_CONFIG" "could not determine the hostname: set BACKUP_SLUG in $VPS_BACKUP_CONFIG"
+    fi
+  elif [[ ! "$BACKUP_SLUG" =~ $SLUG_REGEX ]]; then
+    die "$EXIT_CONFIG" "invalid BACKUP_SLUG '$BACKUP_SLUG' in $VPS_BACKUP_CONFIG: use lowercase letters, digits and hyphens only (1-63 characters)"
+  fi
+
   mkdir -p "$LOG_DIR"
   chmod 750 "$LOG_DIR"
   LOG_FILE="$LOG_DIR/vps-backup.log"
+}
+
+require_password_file() {
+  if [[ ! -s "$RESTIC_PASSWORD_FILE" ]]; then
+    die "$EXIT_CONFIG" "password file missing: $RESTIC_PASSWORD_FILE (run 'vps-backup init')"
+  fi
+}
+
+# Takes the lock shared by "run" and "export", so they never overlap.
+# Fails if another process holds it.
+acquire_lock() {
+  exec 9>"$LOCK_FILE"
+  flock -n 9
+}
+
+human_size() {
+  numfmt --to=iec --suffix=B "$1"
 }
 
 # Usage: log LEVEL message...

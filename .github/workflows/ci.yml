@@ -13,9 +13,12 @@ jobs:
 
       - name: Syntax check
         run: |
-          for file in vps-backup install.sh lib/*.sh vps-backup.conf.example; do
+          for file in vps-backup install.sh lib/*.sh tests/run.sh vps-backup.conf.example; do
             bash -n "$file"
           done
 
       - name: ShellCheck
-        run: shellcheck -x vps-backup install.sh lib/*.sh
+        run: shellcheck -x vps-backup install.sh lib/*.sh tests/run.sh
+
+      - name: Smoke tests
+        run: bash tests/run.sh

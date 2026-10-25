@@ -7,6 +7,15 @@
 RESTIC_REPOSITORY="rclone:gdrive:vps-backup"
 RESTIC_PASSWORD_FILE="/etc/vps-backup/restic-password"
 
+# --- Server identity ---
+# Host name stored in every snapshot of this server (lowercase letters, digits, hyphens; max 63).
+# Empty = short hostname ('hostname -s'), which matches snapshots taken before 1.1.0
+# unless 'hostname' prints a fully qualified name.
+# Retention only prunes snapshots of this slug, so several servers can share one repository.
+# Changing it starts a new snapshot series: snapshots under the old host are no longer pruned
+# automatically. Remove them with: sudo vps-backup restic forget --host <old> --prune ...
+BACKUP_SLUG=""
+
 # --- Monitoring: Uptime Kuma push URL (empty = disabled) ---
 # Use a Push monitor with a heartbeat interval longer than the gap between runs (e.g. 25h).
 PUSH_URL=""
@@ -15,6 +24,8 @@ PUSH_URL=""
 LOG_DIR="/var/log/vps-backup"
 DUMP_DIR="/var/backups/vps-backup-dumps"
 VOLUMES_ROOT="/var/lib/docker/volumes"
+# Default destination of 'vps-backup export' (unencrypted archives: delete them after download)
+EXPORT_DIR="/var/backups/vps-backup-exports"
 
 # --- Schedule (cron syntax, empty = mode disabled) ---
 # Apply changes with: sudo vps-backup schedule enable

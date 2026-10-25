@@ -3,10 +3,6 @@
 # Uses the same configuration and exclusions as the backup itself.
 # shellcheck disable=SC2154
 
-human_size() {
-  numfmt --to=iec --suffix=B "$1"
-}
-
 cmd_estimate() {
   require_root
   load_config

@@ -12,6 +12,8 @@ source "$VPS_BACKUP_HOME/lib/common.sh"
 source "$VPS_BACKUP_HOME/lib/backup.sh"
 # shellcheck source=lib/estimate.sh
 source "$VPS_BACKUP_HOME/lib/estimate.sh"
+# shellcheck source=lib/export.sh
+source "$VPS_BACKUP_HOME/lib/export.sh"
 # shellcheck source=lib/commands.sh
 source "$VPS_BACKUP_HOME/lib/commands.sh"
 
@@ -27,6 +29,9 @@ Backups
                             full:  configuration + database dumps + Docker volumes
   estimate                Estimate backup sizes without uploading anything
   status                  Show schedule, latest snapshots and recent log lines
+  export light|full|<snapshot-id> [--output DIR]
+                          Write a snapshot to a single .tar.gz archive (NOT encrypted)
+                            light/full: latest snapshot of that mode for this server
 
 Setup
   init                    Create the repository password (if missing) and initialize the repository
@@ -53,6 +58,7 @@ main() {
     light|full)           cmd_run "$command" ;;  # shorthand, kept for backward compatibility
     estimate)             cmd_estimate ;;
     status)               cmd_status ;;
+    export)               cmd_export "$@" ;;
     init)                 cmd_init ;;
     schedule)             cmd_schedule "$@" ;;
     restic)               cmd_restic "$@" ;;

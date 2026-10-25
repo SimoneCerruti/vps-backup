@@ -60,6 +60,7 @@ Layout after install:
 /var/log/vps-backup/                logs (rotated weekly, 8 weeks kept)
 /usr/local/bin/vps-backup           -> /opt/vps-backup/vps-backup
 /etc/cron.d/vps-backup              schedule (managed by 'vps-backup schedule')
+/var/backups/vps-backup-exports/    archives created by 'vps-backup export' (delete after download)
 ```
 
 ## First setup
@@ -96,6 +97,7 @@ Layout after install:
 | `vps-backup run light\|full`                    | Run a backup                                                       |
 | `vps-backup estimate`                           | Estimate sizes without uploading anything                          |
 | `vps-backup status`                             | Schedule, latest snapshots per mode, recent vps-backup events      |
+| `vps-backup export light\|full\|<id> [--output DIR]` | Write a snapshot to one `.tar.gz` archive (see [Export](#export)) |
 | `vps-backup init`                               | Create password (if missing) and initialize the repository         |
 | `vps-backup schedule enable\|disable\|status`   | Manage the cron schedule from `LIGHT_SCHEDULE` / `FULL_SCHEDULE`   |
 | `vps-backup restic <args>`                      | Run any restic command against the configured repository          |
@@ -118,9 +120,11 @@ sudo vps-backup restic ls latest --tag full /var/backups/vps-backup-dumps
 |-------------------------|----------------------------------|-------------------------------------------------------------------------|
 | `RESTIC_REPOSITORY`     | *(required)*                     | Restic repository, e.g. `rclone:gdrive:vps-backup`                      |
 | `RESTIC_PASSWORD_FILE`  | `/etc/vps-backup/restic-password`| Repository password file                                                |
+| `BACKUP_SLUG`           | `hostname -s`                    | Host name of this server's snapshots (see [Server slug](#server-slug))  |
 | `PUSH_URL`              | empty                            | Uptime Kuma push URL; empty disables notifications                      |
 | `LOG_DIR`               | `/var/log/vps-backup`            | Log directory                                                           |
 | `DUMP_DIR`              | `/var/backups/vps-backup-dumps`  | Temporary dump directory, deleted after each run                        |
+| `EXPORT_DIR`            | `/var/backups/vps-backup-exports`| Default destination of `vps-backup export`                             |
 | `VOLUMES_ROOT`          | `/var/lib/docker/volumes`        | Docker volumes directory                                                |
 | `LIGHT_SCHEDULE`        | `0 3 * * 1-6`                    | Cron expression for light; empty disables it                            |
 | `FULL_SCHEDULE`         | `0 3 * * 0`                      | Cron expression for full; empty disables it                             |
@@ -135,6 +139,42 @@ sudo vps-backup restic ls latest --tag full /var/backups/vps-backup-dumps
 | `FULL_EXCLUDE_PATTERNS` | empty                            | Extra restic exclude patterns for full                                  |
 
 After changing a schedule, run `sudo vps-backup schedule enable` to regenerate the cron file.
+
+### Server slug
+
+Every snapshot records the host it belongs to. `BACKUP_SLUG` sets it (lowercase letters, digits and hyphens, at most 63 characters); when empty, the short hostname is used. Retention and `status` only consider snapshots of this slug, so several servers can share one repository without pruning each other's snapshots.
+
+Changing the slug starts a new snapshot series. Snapshots under the old host are no longer pruned automatically: list them with `sudo vps-backup restic snapshots --host <old>` and remove them when no longer needed:
+
+```bash
+sudo vps-backup restic forget --host <old> --keep-last 1 --prune   # or: forget <snapshot-id>... --prune
+```
+
+Snapshots taken before 1.1.0 carry the hostname restic saw. If `hostname` prints a fully qualified name (e.g. `vps.example.com`), the default slug (`vps`) differs from it, so the old snapshots form a separate series to clean up as above.
+
+## Export
+
+A restic repository is encrypted and deduplicated, which is what you want for storage but not for handing a copy to someone or opening it on a laptop. `export` writes one snapshot to a single, plain `.tar.gz` archive, on demand:
+
+```bash
+sudo vps-backup export full                         # latest full snapshot of this server
+sudo vps-backup export light --output /root/exports # latest light snapshot, other directory
+sudo vps-backup export 1a2b3c4d                     # a specific snapshot (ID from 'restic snapshots')
+```
+
+The file is named after the snapshot: `<mode>-<yyyy-mm-dd>-<slug>-backup.tar.gz`, e.g. `full-2026-10-26-hetzner-prod-backup.tar.gz`, using the snapshot date. If that name already exists, the snapshot short ID is added (`full-2026-10-26-hetzner-prod-1a2b3c4d-backup.tar.gz`). A snapshot exported by ID takes the mode from its tags (`snapshot` if neither `light` nor `full`).
+
+- Archives go to `EXPORT_DIR` (default `/var/backups/vps-backup-exports`, created with mode 700); files have mode 600.
+- Before writing, the snapshot's restore size is compared with the free space; the export is refused if it does not fit. The check is conservative, since the compressed archive is smaller.
+- The archive is written to a temporary file and renamed only when complete; a failed export leaves nothing behind.
+- Exports take the same lock as backups, so they never overlap.
+
+**The archive is not encrypted** and contains secrets (`.env` files, database dumps). Download it and delete it from the server:
+
+```bash
+scp root@<server>:/var/backups/vps-backup-exports/full-2026-10-26-hetzner-prod-backup.tar.gz .
+ssh root@<server> rm /var/backups/vps-backup-exports/full-2026-10-26-hetzner-prod-backup.tar.gz
+```
 
 ## Google Drive
 
