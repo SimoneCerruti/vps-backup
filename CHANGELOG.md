@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [1.1.1] - 2026-10-26
+
+### Fixed
+- Exports are owned by the user who ran sudo and saved in their home by default, with a working
+  download hint. Configs copied from the 1.1.0 example set `EXPORT_DIR="/var/backups/vps-backup-exports"`
+  explicitly: set it to `""` to use the new default.
+- `status` reports when there are no snapshots yet.
+- Database dumps and temporary files are created with mode 600.
+
 ## [1.1.0] - 2026-10-25
 
 ### Added

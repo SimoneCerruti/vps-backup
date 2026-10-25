@@ -16,6 +16,7 @@ BIN="$TEST_TMP/bin"
 ROOT="$TEST_TMP/root"       # recreated for every test
 OUT="$TEST_TMP/output"      # stdout and stderr of the last vps-backup call
 FAILURES="$TEST_TMP/failures"
+SKIPPED="$TEST_TMP/skipped"   # reason, when the current test cannot run here
 STATUS=0                    # exit code of the last vps-backup call
 
 # Environment seen by vps-backup and by the fakes
@@ -25,7 +26,10 @@ export FAKE_ROOT="$ROOT"
 export VPS_BACKUP_CONFIG="$ROOT/vps-backup.conf"
 export VPS_BACKUP_LOCK_FILE="$ROOT/vps-backup.lock"
 export VPS_BACKUP_CRON_FILE="$ROOT/cron.d/vps-backup"
+export VPS_BACKUP_DEFAULT_EXPORT_DIR="$ROOT/default-exports"
 export VPS_BACKUP_ALLOW_NON_ROOT=1
+# Tests that simulate sudo set it themselves (also when the suite itself runs through sudo)
+unset SUDO_USER
 
 # --- Fake executables ----------------------------------------------------------
 
@@ -114,6 +118,8 @@ case "$command" in
       echo "[$full_new,$full_old]"
     elif [[ " $* " == *" cafe0123 "* ]]; then
       echo "[$light_other]"
+    elif [[ " $* " == *" --host test-vps "* && " $* " != *" --tag "* ]]; then
+      echo "[$full_new]"
     else
       echo "[]"
     fi
@@ -128,10 +134,11 @@ case "$command" in
     tar -cf - -C "$content" .
     ;;
   backup)
-    # Record which dumps existed while the snapshot was taken
+    # Record which dumps existed while the snapshot was taken, and their modes
     if [[ -d "$FAKE_ROOT/dumps" ]]; then
       ls "$FAKE_ROOT/dumps" > "$FAKE_ROOT/dumps-at-backup"
     fi
+    stat -c '%a %n' "$FAKE_ROOT/dumps"/* > "$FAKE_ROOT/dump-modes" 2>/dev/null
     echo "snapshot abcdef01 saved"
     ;;
   *)
@@ -144,6 +151,18 @@ EOF
 cat > "$BIN/hostname" <<'EOF'
 #!/usr/bin/env bash
 echo "legacy-host"
+EOF
+
+# getent: only the test user vbtest exists, with its home inside the test root.
+# Its uid and gid are FAKE_SUDO_UID (default: the current user, so chown works without root).
+cat > "$BIN/getent" <<'EOF'
+#!/usr/bin/env bash
+if [[ "$1" == "passwd" && "$2" == "vbtest" ]]; then
+  uid="${FAKE_SUDO_UID:-$(id -u)}"
+  echo "vbtest:x:$uid:$uid:Test user:$FAKE_ROOT/home/vbtest:/bin/bash"
+  exit 0
+fi
+exit 2
 EOF
 
 # logger: keep test errors out of the real journal
@@ -195,6 +214,10 @@ vb() {
 
 fail() {
   echo "    $*" >> "$FAILURES"
+}
+
+skip() {
+  echo "$*" > "$SKIPPED"
 }
 
 assert_status() {
@@ -277,6 +300,11 @@ test_run_full() {
   assert_contains "$ROOT/dumps-at-backup" "wp-db-1.sql.gz"
   assert_not_contains "$ROOT/dumps-at-backup" "staging"
   assert_not_contains "$ROOT/docker-calls" "staging"
+  # Dumps readable by root only, whatever the caller's umask
+  [[ -s "$ROOT/dump-modes" ]] || fail "dump modes not recorded"
+  if grep -qv '^600 ' "$ROOT/dump-modes" 2>/dev/null; then
+    fail "dump files not created with mode 600: $(tr '\n' ' ' < "$ROOT/dump-modes")"
+  fi
   [[ ! -e "$ROOT/dumps" ]] || fail "dump directory left on disk"
   assert_call '^forget --compact --host test-vps --tag full --group-by tags --prune --keep-last 3$'
   assert_call '^check --read-data-subset=5%$'
@@ -372,7 +400,8 @@ test_export_full() {
   tar -tzf "$archive" 2>/dev/null | grep -q 'etc/app.env' || fail "archive does not contain the snapshot"
   [[ -z "$(find "$ROOT/exports" -name "*.tmp" 2>/dev/null)" ]] || fail "temporary file left behind"
   assert_contains "$OUT" "NOT encrypted"
-  assert_contains "$OUT" "scp root@legacy-host:$archive ."
+  assert_contains "$OUT" "scp <ssh-host>:$archive ."
+  assert_contains "$OUT" "  sudo rm $archive"
   assert_contains "$(log_file)" "[INFO] [export] Export completed: $archive"
 
   # Same name already taken: the short ID is appended
@@ -390,6 +419,84 @@ test_export_by_id() {
   [[ -f "$ROOT/custom/out/light-2026-10-20-other-vps-backup.tar.gz" ]] \
     || fail "unexpected archive name: $(ls -R "$ROOT/custom" 2>&1)"
   [[ "$(stat -c %a "$ROOT/custom/out" 2>/dev/null)" == "700" ]] || fail "output directory mode is not 700"
+}
+
+test_export_sudo_user() {
+  if [[ $EUID -ne 0 ]]; then
+    skip "giving files to another user needs root (run: sudo bash tests/run.sh test_export_sudo_user)"
+    return
+  fi
+  export SUDO_USER=vbtest FAKE_SUDO_UID=4242
+  sed -i '/^EXPORT_DIR=/d' "$VPS_BACKUP_CONFIG"
+  mkdir -p "$ROOT/home/vbtest"
+  vb export full
+  assert_status 0
+
+  # Automatic directory in the sudo user's home, directory and archive owned by them
+  local dir="$ROOT/home/vbtest/vps-backup-exports"
+  local name="full-2026-10-18-test-vps-backup.tar.gz"
+  [[ -f "$dir/$name" ]] || fail "archive not in the sudo user's home: $(ls -R "$ROOT/home" 2>&1)"
+  [[ "$(stat -c '%u:%g %a' "$dir/$name" 2>/dev/null)" == "4242:4242 600" ]] \
+    || fail "archive owner/mode: $(stat -c '%u:%g %a' "$dir/$name" 2>&1)"
+  [[ "$(stat -c '%u:%g %a' "$dir" 2>/dev/null)" == "4242:4242 700" ]] \
+    || fail "directory owner/mode: $(stat -c '%u:%g %a' "$dir" 2>&1)"
+  [[ -z "$(find "$dir" -name "*.tmp" 2>/dev/null)" ]] || fail "temporary file left behind"
+  assert_contains "$OUT" "scp <ssh-host>:~/vps-backup-exports/$name ."
+  assert_contains "$OUT" "  rm ~/vps-backup-exports/$name"
+  assert_not_contains "$OUT" "root@"
+  assert_not_contains "$OUT" "sudo rm"
+  assert_contains "$OUT" "NOT encrypted"
+
+  # An explicit directory that already exists keeps its owner; only the archive is handed over
+  mkdir -p "$ROOT/shared"
+  vb export full --output "$ROOT/shared"
+  assert_status 0
+  [[ "$(stat -c %u "$ROOT/shared/$name" 2>/dev/null)" == "4242" ]] || fail "archive in --output not owned by the sudo user"
+  [[ "$(stat -c %u "$ROOT/shared")" == "0" ]] || fail "existing --output directory changed owner"
+  assert_contains "$OUT" "  sudo rm $ROOT/shared/$name"
+}
+
+test_export_default_without_sudo_user() {
+  # No sudo user, root, or a user unknown to getent: the system default directory
+  local sudo_user dir="$ROOT/default-exports"
+  for sudo_user in "" root ghost; do
+    setup
+    sed -i '/^EXPORT_DIR=/d' "$VPS_BACKUP_CONFIG"
+    if [[ -n "$sudo_user" ]]; then
+      export SUDO_USER="$sudo_user"
+    else
+      unset SUDO_USER
+    fi
+    vb export full
+    assert_status 0
+    [[ -f "$dir/full-2026-10-18-test-vps-backup.tar.gz" ]] \
+      || fail "SUDO_USER='$sudo_user': archive not in the default directory: $(ls -A "$dir" 2>&1)"
+    [[ "$(stat -c %a "$dir" 2>/dev/null)" == "700" ]] || fail "default directory mode is not 700"
+    [[ ! -e "$ROOT/home" ]] || fail "SUDO_USER='$sudo_user': a home directory was used"
+    assert_contains "$OUT" "scp <ssh-host>:$dir/full-2026-10-18-test-vps-backup.tar.gz ."
+    assert_contains "$OUT" "  sudo rm $dir/"
+  done
+}
+
+test_export_explicit_dir_wins() {
+  # vbtest has the current uid, so this runs without root too
+  export SUDO_USER=vbtest
+  mkdir -p "$ROOT/home/vbtest"
+  local name="full-2026-10-18-test-vps-backup.tar.gz"
+
+  # EXPORT_DIR from the config (set by setup) beats the sudo user's home
+  vb export full
+  assert_status 0
+  [[ -f "$ROOT/exports/$name" ]] || fail "EXPORT_DIR not used: $(ls -A "$ROOT/exports" 2>&1)"
+  [[ "$(stat -c %a "$ROOT/exports" 2>/dev/null)" == "700" ]] || fail "export directory mode is not 700"
+  assert_contains "$OUT" "scp <ssh-host>:$ROOT/exports/$name ."
+
+  # --output beats EXPORT_DIR
+  vb export full --output "$ROOT/out"
+  assert_status 0
+  [[ -f "$ROOT/out/$name" ]] || fail "--output not used: $(ls -A "$ROOT/out" 2>&1)"
+  [[ ! -e "$ROOT/home/vbtest/vps-backup-exports" ]] || fail "automatic directory created despite an explicit one"
+  [[ ! -e "$ROOT/default-exports" ]] || fail "default directory created despite an explicit one"
 }
 
 test_export_insufficient_space() {
@@ -447,6 +554,15 @@ test_status() {
   assert_call '^snapshots --compact --host test-vps --group-by tags --latest 3$'
 }
 
+test_status_no_snapshots() {
+  export FAKE_RESTIC_NO_SNAPSHOTS=1
+  vb status
+  assert_status 0
+  assert_call '^snapshots --json --latest 1 --host test-vps$'
+  assert_contains "$OUT" "  No snapshots yet for test-vps"
+  assert_no_call '^snapshots --compact'
+}
+
 test_status_restic_error() {
   export FAKE_RESTIC_FAIL=snapshots
   vb status
@@ -476,12 +592,17 @@ fi
 
 passed=0
 failed=0
+skipped=0
 for test in "${tests[@]}"; do
   setup
   : > "$FAILURES"
+  rm -f "$SKIPPED"
   # Subshell: exported FAKE_* variables and open descriptors do not leak between tests
   ( "$test" )
-  if [[ -s "$FAILURES" ]]; then
+  if [[ -s "$SKIPPED" ]]; then
+    echo "SKIP  $test: $(cat "$SKIPPED")"
+    skipped=$((skipped + 1))
+  elif [[ -s "$FAILURES" ]]; then
     echo "FAIL  $test"
     cat "$FAILURES"
     failed=$((failed + 1))
@@ -492,7 +613,7 @@ for test in "${tests[@]}"; do
 done
 
 echo
-echo "$passed passed, $failed failed"
+echo "$passed passed, $failed failed, $skipped skipped"
 if (( failed > 0 )); then
   exit 1
 fi

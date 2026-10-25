@@ -24,8 +24,11 @@ PUSH_URL=""
 LOG_DIR="/var/log/vps-backup"
 DUMP_DIR="/var/backups/vps-backup-dumps"
 VOLUMES_ROOT="/var/lib/docker/volumes"
-# Default destination of 'vps-backup export' (unencrypted archives: delete them after download)
-EXPORT_DIR="/var/backups/vps-backup-exports"
+# Default destination of 'vps-backup export' (unencrypted archives: delete them after download).
+# Empty = automatic: ~/vps-backup-exports of the user who ran sudo, owned by them so they can
+# download it over SSH; /var/backups/vps-backup-exports when run directly as root.
+# A value here (or --output) always wins.
+EXPORT_DIR=""
 
 # --- Schedule (cron syntax, empty = mode disabled) ---
 # Apply changes with: sudo vps-backup schedule enable

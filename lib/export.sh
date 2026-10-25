@@ -55,6 +55,8 @@ newest_snapshot() {
 }
 
 cmd_export() {
+  # The temporary archive is readable by root only until it is complete
+  umask 077
   local target="" output_dir=""
   local usage_text="usage: vps-backup export light|full|<snapshot-id> [--output DIR]"
   while [[ $# -gt 0 ]]; do
@@ -88,7 +90,25 @@ cmd_export() {
   require_password_file
 
   LOG_CONTEXT="export"
-  output_dir="${output_dir:-$EXPORT_DIR}"
+
+  # The non-root user who ran sudo, if any: the archive is saved in their home and owned by them
+  local owner="" owner_uid="" owner_gid="" owner_home="" entry
+  if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]] && entry=$(getent passwd "$SUDO_USER"); then
+    IFS=: read -r owner _ owner_uid owner_gid _ owner_home _ <<< "$entry"
+  fi
+
+  # Precedence: --output, EXPORT_DIR, the sudo user's home, the system default
+  local auto_home=""
+  if [[ -z "$output_dir" ]]; then
+    if [[ -n "$EXPORT_DIR" ]]; then
+      output_dir="$EXPORT_DIR"
+    elif [[ -n "$owner" ]]; then
+      output_dir="$owner_home/vps-backup-exports"
+      auto_home=1
+    else
+      output_dir="$DEFAULT_EXPORT_DIR"
+    fi
+  fi
 
   # Never overlap a backup (or another export)
   if ! acquire_lock; then
@@ -138,9 +158,12 @@ cmd_export() {
   date=$(date -d "$time" +%Y-%m-%d)
   name="$mode-$date-$slug"
 
+  # The sudo user gets the directory only if we created it or it is the automatic one in their home
+  local chown_dir="$auto_home"
   if [[ ! -d "$output_dir" ]]; then
     mkdir -p "$output_dir"
     chmod 700 "$output_dir"
+    chown_dir=1
   fi
   archive="$output_dir/$name-backup.tar.gz"
   if [[ -e "$archive" ]]; then
@@ -173,9 +196,30 @@ cmd_export() {
   mv -f "$EXPORT_TMP" "$archive"
   EXPORT_TMP=""
 
+  # Hand over to the sudo user only now that the archive is complete (-h: never follow a symlink)
+  if [[ -n "$owner" ]]; then
+    chown -h "$owner_uid:$owner_gid" "$archive"
+    if [[ -n "$chown_dir" ]]; then
+      chown -h "$owner_uid:$owner_gid" "$output_dir"
+    fi
+  fi
+
   local size
   size=$(human_size "$(stat -c %s "$archive")")
   log INFO "Export completed: $archive ($size)"
+
+  # Commands as the sudo user types them: path relative to their home, rm without sudo
+  # when they own the directory (deleting a file needs write access to it)
+  local shown="$archive" remove="sudo rm"
+  if [[ -n "$owner" ]]; then
+    if [[ "$archive" == "$owner_home"/* ]]; then
+      # shellcheck disable=SC2088  # printed for the user, expanded on their side
+      shown="~/${archive#"$owner_home"/}"
+    fi
+    if [[ "$(stat -c %u "$output_dir")" == "$owner_uid" ]]; then
+      remove="rm"
+    fi
+  fi
 
   cat <<EOF
 Exported snapshot $short_id ($mode, $time)
@@ -184,9 +228,10 @@ Exported snapshot $short_id ($mode, $time)
   Size: $size
 
 WARNING: this archive is NOT encrypted and contains secrets (.env files, database dumps).
-Download it, then delete it from the server:
+Download it from your computer (<ssh-host>: the host you connect to with ssh),
+then delete it from the server:
 
-  scp root@$(hostname):$archive .
-  sudo rm $archive
+  scp <ssh-host>:$shown .
+  $remove $shown
 EOF
 }

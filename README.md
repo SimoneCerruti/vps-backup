@@ -60,7 +60,7 @@ Layout after install:
 /var/log/vps-backup/                logs (rotated weekly, 8 weeks kept)
 /usr/local/bin/vps-backup           -> /opt/vps-backup/vps-backup
 /etc/cron.d/vps-backup              schedule (managed by 'vps-backup schedule')
-/var/backups/vps-backup-exports/    archives created by 'vps-backup export' (delete after download)
+/var/backups/vps-backup-exports/    archives of 'vps-backup export' run as root (sudo: ~/vps-backup-exports)
 ```
 
 ## First setup
@@ -124,7 +124,7 @@ sudo vps-backup restic ls latest --tag full /var/backups/vps-backup-dumps
 | `PUSH_URL`              | empty                            | Uptime Kuma push URL; empty disables notifications                      |
 | `LOG_DIR`               | `/var/log/vps-backup`            | Log directory                                                           |
 | `DUMP_DIR`              | `/var/backups/vps-backup-dumps`  | Temporary dump directory, deleted after each run                        |
-| `EXPORT_DIR`            | `/var/backups/vps-backup-exports`| Default destination of `vps-backup export`                             |
+| `EXPORT_DIR`            | empty (automatic)                | Default destination of `vps-backup export` (see [Export](#export))      |
 | `VOLUMES_ROOT`          | `/var/lib/docker/volumes`        | Docker volumes directory                                                |
 | `LIGHT_SCHEDULE`        | `0 3 * * 1-6`                    | Cron expression for light; empty disables it                            |
 | `FULL_SCHEDULE`         | `0 3 * * 0`                      | Cron expression for full; empty disables it                             |
@@ -158,23 +158,26 @@ A restic repository is encrypted and deduplicated, which is what you want for st
 
 ```bash
 sudo vps-backup export full                         # latest full snapshot of this server
-sudo vps-backup export light --output /root/exports # latest light snapshot, other directory
+sudo vps-backup export light --output /srv/exports  # latest light snapshot, other directory
 sudo vps-backup export 1a2b3c4d                     # a specific snapshot (ID from 'restic snapshots')
 ```
 
 The file is named after the snapshot: `<mode>-<yyyy-mm-dd>-<slug>-backup.tar.gz`, e.g. `full-2026-10-26-hetzner-prod-backup.tar.gz`, using the snapshot date. If that name already exists, the snapshot short ID is added (`full-2026-10-26-hetzner-prod-1a2b3c4d-backup.tar.gz`). A snapshot exported by ID takes the mode from its tags (`snapshot` if neither `light` nor `full`).
 
-- Archives go to `EXPORT_DIR` (default `/var/backups/vps-backup-exports`, created with mode 700); files have mode 600.
+- Archives go to `--output`, else `EXPORT_DIR`. When both are empty (the default), they go to `~/vps-backup-exports` of the user who ran `sudo`, or to `/var/backups/vps-backup-exports` when run directly as root.
+- Directories are created with mode 700 and files have mode 600. When run through `sudo`, the archive belongs to that user, and so does the directory if vps-backup created it or it is the automatic one in their home. Ownership changes only once the archive is complete.
 - Before writing, the snapshot's restore size is compared with the free space; the export is refused if it does not fit. The check is conservative, since the compressed archive is smaller.
 - The archive is written to a temporary file and renamed only when complete; a failed export leaves nothing behind.
 - Exports take the same lock as backups, so they never overlap.
 
-**The archive is not encrypted** and contains secrets (`.env` files, database dumps). Download it and delete it from the server:
+**The archive is not encrypted** and contains secrets (`.env` files, database dumps). Download it from your computer, then delete it from the server. `export` prints both commands; `<ssh-host>` is whatever you pass to `ssh` (e.g. `deploy@203.0.113.10`, or a `Host` alias from `~/.ssh/config`):
 
 ```bash
-scp root@<server>:/var/backups/vps-backup-exports/full-2026-10-26-hetzner-prod-backup.tar.gz .
-ssh root@<server> rm /var/backups/vps-backup-exports/full-2026-10-26-hetzner-prod-backup.tar.gz
+scp <ssh-host>:~/vps-backup-exports/full-2026-10-26-hetzner-prod-backup.tar.gz .   # on your computer
+rm ~/vps-backup-exports/full-2026-10-26-hetzner-prod-backup.tar.gz                 # on the server
 ```
+
+Archives written to a directory owned by root (e.g. an explicit `EXPORT_DIR` that already exists) need `sudo rm`. If your config still contains `EXPORT_DIR="/var/backups/vps-backup-exports"` from the 1.1.0 example, set it to `""` to get the automatic default.
 
 ## Google Drive
 

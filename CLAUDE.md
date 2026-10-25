@@ -64,6 +64,7 @@ It needs neither root nor Docker. CI runs it after ShellCheck.
   | `VPS_BACKUP_CONFIG`         | `/etc/vps-backup/vps-backup.conf`           |
   | `VPS_BACKUP_LOCK_FILE`      | `/run/lock/vps-backup.lock`                 |
   | `VPS_BACKUP_CRON_FILE`      | `/etc/cron.d/vps-backup`                    |
+  | `VPS_BACKUP_DEFAULT_EXPORT_DIR` | `/var/backups/vps-backup-exports`       |
   | `VPS_BACKUP_ALLOW_NON_ROOT` | unset; `1` skips the root check (tests only) |
 
 - New behaviour comes with a test.

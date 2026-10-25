@@ -12,6 +12,8 @@ VPS_BACKUP_CONFIG="${VPS_BACKUP_CONFIG:-/etc/vps-backup/vps-backup.conf}"
 # System paths, overridable so that the test suite never touches the real ones
 CRON_FILE="${VPS_BACKUP_CRON_FILE:-/etc/cron.d/vps-backup}"
 LOCK_FILE="${VPS_BACKUP_LOCK_FILE:-/run/lock/vps-backup.lock}"
+# Export destination when EXPORT_DIR is empty and the command was not run through sudo
+DEFAULT_EXPORT_DIR="${VPS_BACKUP_DEFAULT_EXPORT_DIR:-/var/backups/vps-backup-exports}"
 
 # Snapshot host names: lowercase letters, digits and hyphens, 1-63 characters
 SLUG_REGEX='^[a-z0-9-]{1,63}$'
@@ -52,7 +54,7 @@ load_config() {
   PUSH_URL=""
   LOG_DIR="/var/log/vps-backup"
   DUMP_DIR="/var/backups/vps-backup-dumps"
-  EXPORT_DIR="/var/backups/vps-backup-exports"
+  EXPORT_DIR=""  # empty: automatic, see cmd_export
   VOLUMES_ROOT="/var/lib/docker/volumes"
   LIGHT_KEEP_LAST=14
   FULL_KEEP_LAST=3

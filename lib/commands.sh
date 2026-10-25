@@ -57,7 +57,9 @@ cmd_status() {
   echo
   echo "== Latest snapshots (per tag)"
   local output line
-  if output=$(restic snapshots --compact --host "$BACKUP_SLUG" --group-by tags --latest 3 2>&1); then
+  if output=$(restic snapshots --json --latest 1 --host "$BACKUP_SLUG" 2>&1) && [[ "$output" == "[]" ]]; then
+    echo "  No snapshots yet for $BACKUP_SLUG"
+  elif output=$(restic snapshots --compact --host "$BACKUP_SLUG" --group-by tags --latest 3 2>&1); then
     echo "$output"
   else
     echo "  Repository error:"

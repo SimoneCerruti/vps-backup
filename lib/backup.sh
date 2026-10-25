@@ -18,6 +18,8 @@ on_backup_error() {
 }
 
 cmd_run() {
+  # Database dumps and temporary files readable by root only
+  umask 077
   local mode="${1:-}"
   if [[ "$mode" != "light" && "$mode" != "full" ]]; then
     die "$EXIT_USAGE" "usage: vps-backup run light|full"
