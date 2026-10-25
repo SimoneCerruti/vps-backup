@@ -95,7 +95,7 @@ Layout after install:
 |-------------------------------------------------|--------------------------------------------------------------------|
 | `vps-backup run light\|full`                    | Run a backup                                                       |
 | `vps-backup estimate`                           | Estimate sizes without uploading anything                          |
-| `vps-backup status`                             | Schedule, latest snapshots per mode, recent log lines              |
+| `vps-backup status`                             | Schedule, latest snapshots per mode, recent vps-backup events      |
 | `vps-backup init`                               | Create password (if missing) and initialize the repository         |
 | `vps-backup schedule enable\|disable\|status`   | Manage the cron schedule from `LIGHT_SCHEDULE` / `FULL_SCHEDULE`   |
 | `vps-backup restic <args>`                      | Run any restic command against the configured repository          |

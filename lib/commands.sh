@@ -61,9 +61,10 @@ cmd_status() {
   fi
 
   echo
-  echo "== Recent log ($LOG_FILE)"
+  echo "== Recent events ($LOG_FILE)"
   if [[ -f "$LOG_FILE" ]]; then
-    tail -n 15 "$LOG_FILE"
+    # Hide output forwarded by run_logged (message indented by two spaces)
+    { grep -vE '^[^ ]+ [^ ]+ \[[A-Z]+\] \[[^]]*\]   ' "$LOG_FILE" || true; } | tail -n 15
   else
     echo "  No log yet"
   fi

@@ -104,9 +104,9 @@ cmd_run() {
   # Retention is grouped by tag, so changing the configured paths does not orphan old snapshots
   log INFO "Applying retention"
   if [[ "$mode" == "light" ]]; then
-    run_logged restic forget --tag light --group-by tags --prune --keep-last "$LIGHT_KEEP_LAST"
+    run_logged restic forget --compact --tag light --group-by tags --prune --keep-last "$LIGHT_KEEP_LAST"
   else
-    run_logged restic forget --tag full --group-by tags --prune --keep-last "$FULL_KEEP_LAST"
+    run_logged restic forget --compact --tag full --group-by tags --prune --keep-last "$FULL_KEEP_LAST"
     if [[ -n "${FULL_CHECK_SUBSET:-}" ]]; then
       log INFO "Verifying $FULL_CHECK_SUBSET of the stored data"
       run_logged restic check --read-data-subset="$FULL_CHECK_SUBSET"
